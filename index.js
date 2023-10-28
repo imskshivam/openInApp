@@ -1,9 +1,11 @@
+// app.js
+
 const express = require("express");
 const app = express();
 const path = require("path");
 const { authenticate } = require("@google-cloud/local-auth");
-const fs = require("fs").promises;
 const { google } = require("googleapis");
+const { getUnrepliedMessages, createLabel } = require("./gmailFunctions"); // Import the functions
 
 const port = 3030;
 
@@ -14,83 +16,22 @@ const SCOPES = [
   "https://mail.google.com/",
 ];
 
-// i kept the label name
 const labelName = "Auto_Reply";
 
-
 app.get("/", async (req, res) => {
-
-  // here i am taking google GMAIL  authentication 
   const auth = await authenticate({
     keyfilePath: path.join(__dirname, "credentials.json"),
     scopes: SCOPES,
   });
 
-  console.log("this is auth",auth)
-
-  // here i getting authorize gmail id
   const gmail = google.gmail({ version: "v1", auth });
 
-
-  //  here i am finding all the labels availeble on current gmail
-  const response = await gmail.users.labels.list({
-    userId: "me",
-  });
-
-
-
-
-  //  this function is finding all email that have unreplied or unseen
-  async function getUnrepliesMessages(auth) {
-    const gmail = google.gmail({ version: "v1", auth });
-    const response = await gmail.users.messages.list({
-      userId: "me",
-      labelIds: ["INBOX"],
-      q: "is:unread",
-    });
-    
-    return response.data.messages || [];
-  }
-
-  //  this function generating the label ID
-  async function createLabel(auth) {
-    const gmail = google.gmail({ version: "v1", auth });
-    try {
-      const response = await gmail.users.labels.create({
-        userId: "me",
-        requestBody: {
-          name: labelName,
-          labelListVisibility: "labelShow",
-          messageListVisibility: "show",
-        },
-      });
-      return response.data.id;
-    } catch (error) {
-      if (error.code === 409) {
-        const response = await gmail.users.labels.list({
-          userId: "me",
-        });
-        const label = response.data.labels.find(
-          (label) => label.name === labelName
-        );
-        return label.id;
-      } else {
-        throw error;
-      }
-    }
-  }
-
   async function main() {
-    // Create a label for theApp
     const labelId = await createLabel(auth);
-    // console.log(`Label  ${labelId}`);
-    // Repeat  in Random intervals
-    setInterval(async () => {
-     
-      const messages = await getUnrepliesMessages(auth);
-     
 
-      //  Here i am checking is there any gmail that did not get reply
+    setInterval(async () => {
+      const messages = await getUnrepliedMessages(auth);
+
       if (messages && messages.length > 0) {
         for (const message of messages) {
           const messageData = await gmail.users.messages.get({
@@ -105,7 +46,6 @@ app.get("/", async (req, res) => {
           );
 
           if (!hasReplied) {
-            // Craft the reply message
             const replyMessage = {
               userId: "me",
               resource: {
@@ -129,7 +69,6 @@ app.get("/", async (req, res) => {
 
             await gmail.users.messages.send(replyMessage);
 
-            // Add label and move the email
             await gmail.users.messages.modify({
               auth,
               userId: "me",
@@ -145,10 +84,8 @@ app.get("/", async (req, res) => {
     }, Math.floor(Math.random() * (120 - 45 + 1) + 45) * 1000);
   }
 
-
-  
   main();
-  // const labels = response.data.labels;
+
   res.json({ "this is Auth": auth });
 });
 
